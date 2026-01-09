@@ -25,6 +25,9 @@ TWITTER_API_SECRET = os.getenv("TWITTER_API_SECRET")
 TWITTER_ACCESS_TOKEN = os.getenv("TWITTER_ACCESS_TOKEN")
 TWITTER_ACCESS_SECRET = os.getenv("TWITTER_ACCESS_SECRET")
 
+INPUT_DIR = Path("inputs")
+ARCHIVE_DIR = INPUT_DIR / "archived"
+
 def analyze_markdown(content):
     """LLMを使用してプロジェクト情報を抽出する"""
     clipped_content = content[-20000:] if len(content) > 20000 else content
@@ -93,7 +96,7 @@ def create_notion_page(data, github_url):
     res = requests.post(url, json=payload, headers=headers)
     return res.json()
 
-def sync_github(project_name, local_dir):
+def sync_github(project_name, local_dir, input_file_path):
     """GitHubに同期する"""
     repo = Repo(GITHUB_REPO_PATH)
     remote_url = f"https://{GITHUB_USER_NAME}:{GITHUB_TOKEN}@github.com/{GITHUB_USER_NAME}/{os.path.basename(GITHUB_REPO_PATH)}.git"
@@ -107,7 +110,8 @@ def sync_github(project_name, local_dir):
     
     if not github_project_dir.exists(): github_project_dir.mkdir(parents=True)
     
-    ignore_items = {'.git', 'record_agent.py', '.env', 'node_modules', 'setup_notion.py', 'record.bat', 'projects', '.agent', '.gitignore', 'AI Agent Activity Automation.md', 'check_notion.py', 'check_notion_debug.py', 'verify_db.py', 'run_output.txt', 'last_run.txt', 'real_id.txt', 'notion_id.txt'}
+    # 除外リスト (inputsフォルダ全体を除外)
+    ignore_items = {'.git', 'record_agent.py', '.env', 'node_modules', 'setup_notion.py', 'record.bat', 'projects', '.agent', '.gitignore', 'inputs', 'check_notion.py', 'check_notion_debug.py', 'verify_db.py', 'run_output.txt', 'last_run.txt', 'real_id.txt', 'notion_id.txt'}
     
     for item in os.listdir(local_dir):
         if item in ignore_items or item.startswith('.'): continue
@@ -116,10 +120,18 @@ def sync_github(project_name, local_dir):
             if s.is_dir():
                 if d.exists(): shutil.rmtree(d)
                 shutil.copytree(s, d)
-            else: shutil.copy2(s, d)
+            else:
+                shutil.copy2(s, d)
         except Exception as e:
             print(f"Warning: Copy failed for {item}: {e}")
     
+    # 入力ファイルをプロジェクトフォルダ内にコピー
+    shutil.copy2(input_file_path, github_project_dir / "chat_history.md")
+
+    # README作成
+    with open(github_project_dir / "README.md", "w", encoding="utf-8") as f:
+        f.write(f"# {project_name}\n\n## 開発記録\nこのプロジェクトは自動記録システムによって保存されました。\n\n## 実行日\n{date_str}\n\n## 元のチャット履歴\n[chat_history.md](./chat_history.md)")
+
     repo.git.add(A=True)
     repo.index.commit(f"Add project: {project_name}")
     try:
@@ -143,13 +155,9 @@ def post_to_x(data, notion_url, github_url):
     print(f"投稿内容:\n{text}")
     client.create_tweet(text=text)
 
-def main():
-    print("--- 処理開始 ---")
-    if not os.path.exists("AI Agent Activity Automation.md"):
-        print("Error: 入力ファイルが見つかりません。")
-        return
-
-    with open("AI Agent Activity Automation.md", "r", encoding="utf-8") as f:
+def process_file(file_path):
+    print(f"\n=== ファイル処理中: {file_path.name} ===")
+    with open(file_path, "r", encoding="utf-8") as f:
         content = f.read()
     
     print("--- LLM解析中 ---")
@@ -157,7 +165,7 @@ def main():
     print(f"タイトル: {data['title']}")
     
     print("--- GitHub同期中 ---")
-    github_url = sync_github(data['title'], os.getcwd())
+    github_url = sync_github(data['title'], os.getcwd(), file_path)
     print(f"GitHub: {github_url}")
     
     print("--- Notion記録中 ---")
@@ -171,8 +179,33 @@ def main():
         print("X投稿完了！")
     except Exception as e:
         print(f"X投稿失敗: {e}")
-        print("\n💡 解決策: X Developer Portalで「Read and Write」を選んだあとに、")
-        print("  Access TokenとSecretを『Regenerate』して貼り直したか確認してください。")
+
+    # アーカイブへ移動
+    date_prefix = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_")
+    archive_path = ARCHIVE_DIR / (date_prefix + file_path.name)
+    shutil.move(str(file_path), str(archive_path))
+    print(f"--- 完了！アーカイブに移動しました: {archive_path.name} ---\n")
+
+def main():
+    print("--- AI Agent Logger システム開始 ---")
+    
+    if not INPUT_DIR.exists():
+        INPUT_DIR.mkdir()
+    if not ARCHIVE_DIR.exists():
+        ARCHIVE_DIR.mkdir()
+
+    md_files = list(INPUT_DIR.glob("*.md"))
+    
+    if not md_files:
+        print(f"'{INPUT_DIR}' フォルダに処理待ちのMarkdownファイル (.md) がありません。")
+        return
+
+    print(f"{len(md_files)} 件のファイルを処理します。")
+    for file_path in md_files:
+        try:
+            process_file(file_path)
+        except Exception as e:
+            print(f"ファイル {file_path.name} の処理中に致命的なエラーが発生しました: {e}")
 
 if __name__ == "__main__":
     main()
