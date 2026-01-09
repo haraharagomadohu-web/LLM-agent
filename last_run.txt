@@ -1,0 +1,8 @@
+﻿--- 処理開始 ---
+Using OpenAI...
+Using Gemini (gemini-2.0-flash)...
+タイトル: AIエージェント自動化
+GitHub: https://github.com/haraharagomadohu-web/LLM-agent/tree/main/projects/20260109_AIエージェント自動化
+Notion: https://www.notion.so/AI-2e304a32568481d59a6dd835856a37a1
+X投稿失敗: 403 Forbidden
+Your client app is not configured with the appropriate oauth1 app permissions for this endpoint.
