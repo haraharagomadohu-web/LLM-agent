@@ -1,0 +1,8 @@
+.env
+.agent/
+__pycache__/
+*.pyc
+setup_notion.py
+check_notion.py
+node_modules/
+projects/
