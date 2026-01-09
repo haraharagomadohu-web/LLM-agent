@@ -76,8 +76,9 @@ def create_notion_page(data, github_url):
         "Content-Type": "application/json",
         "Notion-Version": "2022-06-28"
     }
+    db_id = NOTION_DATABASE_ID.replace("-", "")
     payload = {
-        "parent": {"database_id": NOTION_DATABASE_ID.replace("-", "")},
+        "parent": {"database_id": db_id},
         "properties": {
             "Name": {"title": [{"text": {"content": data.get('title', 'Project')}}]},
             "Date": {"date": {"start": datetime.datetime.now().isoformat()}},
@@ -106,59 +107,72 @@ def sync_github(project_name, local_dir):
     
     if not github_project_dir.exists(): github_project_dir.mkdir(parents=True)
     
-    # ★重要：自分自身のプロジェクトフォルダやGitHub管理用ファイルを除外して無限ループを防ぐ
-    ignore_items = {'.git', 'record_agent.py', '.env', 'node_modules', 'setup_notion.py', 'record.bat', 'projects', '.agent'}
+    ignore_items = {'.git', 'record_agent.py', '.env', 'node_modules', 'setup_notion.py', 'record.bat', 'projects', '.agent', '.gitignore', 'AI Agent Activity Automation.md', 'check_notion.py', 'check_notion_debug.py', 'verify_db.py', 'run_output.txt', 'last_run.txt', 'real_id.txt', 'notion_id.txt'}
     
     for item in os.listdir(local_dir):
         if item in ignore_items or item.startswith('.'): continue
         s, d = Path(local_dir) / item, github_project_dir / item
-        if s.is_dir():
-            if d.exists(): shutil.rmtree(d)
-            shutil.copytree(s, d)
-        else: shutil.copy2(s, d)
+        try:
+            if s.is_dir():
+                if d.exists(): shutil.rmtree(d)
+                shutil.copytree(s, d)
+            else: shutil.copy2(s, d)
+        except Exception as e:
+            print(f"Warning: Copy failed for {item}: {e}")
     
-    # 初回プッシュのための設定
     repo.git.add(A=True)
-    repo.index.commit(f"Add: {project_name}")
+    repo.index.commit(f"Add project: {project_name}")
     try:
-        current_branch = repo.active_branch.name
-        repo.git.push('--set-upstream', 'origin', current_branch)
-    except:
         repo.remote('origin').push()
+    except Exception as e:
+        print(f"Git push failed: {e}")
     
-    return f"https://github.com/{GITHUB_USER_NAME}/{os.path.basename(GITHUB_REPO_PATH)}/tree/main/projects/{date_str}_{clean_title}"
+    return f"https://github.com/{GITHUB_USER_NAME}/{os.path.basename(GITHUB_REPO_PATH)}/tree/master/projects/{date_str}_{clean_title}"
 
 def post_to_x(data, notion_url, github_url):
     """Xに投稿する"""
+    print("--- X投稿準備中 ---")
     client = tweepy.Client(
         consumer_key=TWITTER_API_KEY, consumer_secret=TWITTER_API_SECRET,
         access_token=TWITTER_ACCESS_TOKEN, access_token_secret=TWITTER_ACCESS_SECRET
     )
-    text = f"【AI開発記録】\n{data.get('title')}\n\n{data.get('x_summary')}\n\nNotion: {notion_url}\nGitHub: {github_url}\n#AIエージェント"
+    title = data.get('title', '新プロジェクト')
+    summary = data.get('x_summary', '自動記録システムからの投稿です。')
+    text = f"【AI開発記録】\n{title}\n\n{summary}\n\nNotion: {notion_url}\nGitHub: {github_url}\n#AIエージェント"
+    
+    print(f"投稿内容:\n{text}")
     client.create_tweet(text=text)
 
 def main():
     print("--- 処理開始 ---")
+    if not os.path.exists("AI Agent Activity Automation.md"):
+        print("Error: 入力ファイルが見つかりません。")
+        return
+
     with open("AI Agent Activity Automation.md", "r", encoding="utf-8") as f:
         content = f.read()
     
+    print("--- LLM解析中 ---")
     data = analyze_markdown(content)
     print(f"タイトル: {data['title']}")
     
+    print("--- GitHub同期中 ---")
     github_url = sync_github(data['title'], os.getcwd())
     print(f"GitHub: {github_url}")
     
+    print("--- Notion記録中 ---")
     notion_res = create_notion_page(data, github_url)
     notion_url = notion_res.get('url', 'Notion失敗')
     print(f"Notion: {notion_url}")
-    if 'object' in notion_res and notion_res['object'] == 'error':
-        print(f"Notionエラー詳細: {notion_res['message']}")
     
+    print("--- X投稿中 ---")
     try:
         post_to_x(data, notion_url, github_url)
         print("X投稿完了！")
     except Exception as e:
         print(f"X投稿失敗: {e}")
+        print("\n💡 解決策: X Developer Portalで「Read and Write」を選んだあとに、")
+        print("  Access TokenとSecretを『Regenerate』して貼り直したか確認してください。")
 
 if __name__ == "__main__":
     main()
